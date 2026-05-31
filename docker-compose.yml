@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: chatdb
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: chatpass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./server/src/db/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  server:
+    build: ./server
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://chat:chatpass@postgres:5432/chatdb
+      REDIS_URL: redis://redis:6379
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      CLIENT_URL: http://localhost:9876
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  pgdata:
