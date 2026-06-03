@@ -1,0 +1,39 @@
+const db = require('../../config/db')
+
+module.exports=(io,socket,publisher)=>{
+    const {userId}=socket.user //js object destructuring. grabs the userid from the user who has undergone jwt authentication
+
+    socket.on('message:sent', async({channel,content, type='text',language})
+)
+const result = await db.query(`INSERT INTO messages(sender_id, channel_id, content, type, language) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [userId, ChannelId,content, type,language]);
+
+    const msg = result.rows[0]
+
+}
+
+await publisher.publish(await JSON.stringify({
+    room:`channel:${channelId}`,
+    event:'message:new',
+
+    payload:msg,
+}));
+
+//logic fro dming each other
+
+socket.on('dm:send', async({toUserId, content, type='text', language})=>{
+    const result = await db.query(
+        `INSERT INTO messages(sender_id, dm_to, content,type,language) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [userId, toUserId, content,type,language]);
+    const msg = result.rows[0]
+
+
+    const dmRoom = [userId, toUserId].sort().join(':') //create a private channel for both users since its a dm. this channels name would be from their userIds in aschending order. for example commmuni btw user 12 and user 45 would be in 12:45 and not 45:12 room
+    await publisher.publish('chat', JSON.stringify({
+        room:`dm:${dmRoom}`,
+        event:'dm:send',
+        payload:msg
+    })
+)
+}
+)
