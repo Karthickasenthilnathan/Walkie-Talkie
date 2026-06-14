@@ -1,17 +1,17 @@
-const jwt = requires('jsonwebtoken')
-const secret = require('../config/jwtSecret');
-jwt.verify(token, jwtSecret)
+const jwt = require('jsonwebtoken');
+const { jwtSecret } = require('../config/env');
 
-module.exports = (socket,next) =>{
-    const token = socket.handshake.auth?.token;   // ? = chaining. if suppose auths value is null then instead of crashing the token is assigned to value of underfined
-if(!token){
-    return next(new Error("No token provided"))
-}
-try{
-    const secret = jwt.verify(token, jwtSecret);
-    next();
-}
-catch(err){
-    return next(new Error('Invalid Token'))
-}
-}
+module.exports = (socket, next) => {
+    const token = socket.handshake.auth?.token; // ?. = optional chaining
+
+    if (!token) {
+        return next(new Error('No token provided'));
+    }
+
+    try {
+        socket.user = jwt.verify(token, jwtSecret); // store decoded payload on socket
+        next();
+    } catch (err) {
+        return next(new Error('Invalid Token'));
+    }
+};
