@@ -1,12 +1,12 @@
-const { Server } = require('socket.io'); //creates a socket server
+import { Server } from 'socket.io'; //creates a socket server
 
-const { publisher, subscriber } = require('../config/redis');
-const authMiddleware = require('./middleware');
-const messageHandler = require('./handlers/message');
+import { publisher, subscriber } from '../config/redis.js';
+import authMiddleware from './middleware.js';
+import messageHandler from './handlers/message.js';
 
 const ONLINE_KEY = 'online_users'; //used to track users who are online
 
-module.exports = (httpServer) => {
+export default (httpServer) => {
     const io = new Server(httpServer, { //creating a server and attaching http to it cuz socket sits on top of http
         cors: {
             origin: '*'

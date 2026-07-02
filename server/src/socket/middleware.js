@@ -1,7 +1,7 @@
-const jwt = require('jsonwebtoken');
-const { jwtSecret } = require('../config/env');
+import jwt from 'jsonwebtoken';
+import { jwtSecret } from '../config/env.js';
 
-module.exports = (socket, next) => {
+export default (socket, next) => {
     const token = socket.handshake.auth?.token; // ?. = optional chaining
 
     if (!token) {

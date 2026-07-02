@@ -1,5 +1,5 @@
-const { createClient } = require('redis');
-const { redisUrl } = require('./env');
+import { createClient } from 'redis';
+import { redisUrl } from './env.js';
 
 const publisher  = createClient({ url: redisUrl });
 const subscriber = createClient({ url: redisUrl });
@@ -9,4 +9,4 @@ const subscriber = createClient({ url: redisUrl });
   await subscriber.connect();
 })();
 
-module.exports = { publisher, subscriber };
+export { publisher, subscriber };

@@ -1,6 +1,6 @@
-const db = require('../../config/db');
+import db from '../../config/db.js';
 
-module.exports = (io, socket, publisher) => {
+export default (io, socket, publisher) => {
     const { userId } = socket.user; //js object destructuring. grabs the userid from the user who has undergone jwt authentication
 
     //channel message

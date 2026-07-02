@@ -1,39 +1,52 @@
+// server/src/app.js
 import 'dotenv/config';
 
-import express from 'express'; //backend framework
-import http from 'http'; //creates raw http server
+import './config/env.js'; // Validates env vars at startup — throws if anything's missing
+import http from 'node:http';
+import express from 'express';
 import cors from 'cors';
-import morgan from 'morgan';
 
 import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
+import setupSocket from './socket/index.js';
 
-import setupSocket from './socket.js';
-import env from './config/env.js';
+import { port } from './config/env.js';
+import pool from './config/db.js';
+import { publisher, subscriber } from './config/redis.js';
 
-const app = express();
-
-//middleware
-app.use(cors());
-app.use(express.json()); //allows req.body parsing
-app.use(morgan('dev')); //logs requests
-
-//health check route
-app.get('/', (req, res) => {
-    res.send('Terminal Chat Server Running 🚀');
-});
-
-//mount routes
-app.use('/auth', authRoutes);
-app.use('/api', apiRoutes);
-
-//create http server so socket.io can sit on top of it
+const app    = express();
 const server = http.createServer(app);
 
-//initialize socket.io
-setupSocket(server);
+// ── Middleware ──────────────────────────────────────────────────────────────
+app.use(cors());
+app.use(express.json());
 
-//start server
-server.listen(env.port, () => {
-    console.log(`Server running on port ${env.port}`);
+// ── Routes ──────────────────────────────────────────────────────────────────
+app.use('/auth', authRoutes);   // GitHub OAuth: /auth/github, /auth/github/callback
+app.use('/api',  apiRoutes);    // REST: /api/channels, /api/users, /api/dm/:id/messages
+
+// Health check (useful for Docker / load balancer)
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// ── Socket.IO ───────────────────────────────────────────────────────────────
+setupSocket(server);   // attaches io to the same http server
+
+// ── Start ───────────────────────────────────────────────────────────────────
+server.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
+
+// ── Graceful shutdown ───────────────────────────────────────────────────────
+const shutdown = async (signal) => {
+  console.log(`\n${signal} received — shutting down gracefully`);
+  server.close(async () => {
+    await pool.end();
+    await publisher.quit();
+    await subscriber.quit();
+    console.log('All connections closed. Bye!');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));

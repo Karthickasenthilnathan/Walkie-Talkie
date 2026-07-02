@@ -75,7 +75,7 @@ router.get('/users', auth, async (req, res) => {
 
     const users = result.rows.map(u => ({
         ...u,
-        online: online.includes(u.id)
+        online: online.includes(String(u.id))
     }));
 
     res.json(users);

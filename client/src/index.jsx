@@ -13,8 +13,7 @@ const App = () => {
     const [messages, setMessages] = useState([]);
 
     const [input, setInput] = useState('');
-    const [currentChannel, setCurrentChannel] = useState('general');
-
+    const [currentChannel, setCurrentChannel] = useState(null);
     const { exit } = useApp();
 
     useEffect(() => {
@@ -40,7 +39,7 @@ const App = () => {
         const isCode = value.startsWith('```');
 
         socket.emit('message:send', {
-            channelId: currentChannel,
+            channelId: currentChannel.id,
             content: isCode
                 ? value
                       .replace(/```(\w*)\n?/, '')
