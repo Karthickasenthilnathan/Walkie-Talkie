@@ -15,7 +15,8 @@ const renderMessageContent = (msg) => {
         return <Text>{msg.content}</Text>;
     }
 
-    
+    const language = msg.language || "text";
+    const content = msg.content;
 
     return (
         <Box flexDirection="column" marginTop={0}>
@@ -50,7 +51,9 @@ const App = () => {
     const [input, setInput] = useState('');
     const [currentChannel, setCurrentChannel] = useState(null);
     const [mode, setMode] = useState("text");
-    const [language, setLanguage] = useState("javascript");
+    
+    const [status, setStatus] = useState("");
+    const [codeLanguage, setCodeLanguage] = useState("text");
     const { exit } = useApp();
 
 
@@ -98,50 +101,75 @@ const App = () => {
         return () => s.disconnect();
     }, [token]);
     
+    const handleCommand = (input) => {
+    const [cmd, ...args] = input.trim().split(/\s+/);
 
+    switch (cmd.toLowerCase()) {
+        case "/code":
+            if (args.length === 0) {
+                setStatus("Usage: /code <language>");
+                break;
+            }
+
+            setCodeLanguage(args[0].toLowerCase());
+            setMode("code");
+            setStatus(`Switched to Code Mode (${args[0]})`);
+            break;
+
+        case "/text":
+            setMode("text");
+            setCodeLanguage("text");
+            setStatus("Switched to Text Mode");
+            break;
+
+        default:
+            setStatus(`Unknown command: ${cmd}`);
+    }
+
+    setTimeout(() => setStatus(""), 2000);
+};
     const sendMessage = (value) => {
-        //process.stderr.write("REACHEDDDD\n");
-        if (!value.trim()) return;
-        if (!socket) {
-            process.stderr.write("sendMessage blocked: socket not ready\n");
-            return;
-        }
+    const trimmed = value.trim();
 
-        //const snippet = parseSnippet(value);
-        //const isCode = Boolean(snippet);
-        if (!currentChannel) {
-            process.stderr.write("sendMessage blocked: no current channel yet\n");
-            return;
-        }
-       const payload =
-    mode === "text"
-        ? {
-              channelId: currentChannel.id,
-              type: "text",
-              content: value
-          }
-        : {
-              channelId: currentChannel.id,
-              type: "code_snippet",
-              language,
-              content: value
-          };
+    if (!trimmed) return;
 
-socket.emit("message:send", payload);
-/*
+    if (!socket) {
+        process.stderr.write("Socket not ready\n");
+        return;
+    }
 
-        socket.emit('message:send', {
-            channelId: currentChannel.id,
-            content: isCode ? snippet.content : value,
-            type: isCode ? 'code_snippet' : 'text',
-            language: isCode ? snippet.language : null,
-        });
-        */
+    if (!currentChannel) {
+        process.stderr.write("No channel selected\n");
+        return;
+    }
 
+    // Handle commands
+    if (trimmed.startsWith("/")) {
+        handleCommand(trimmed);
         setInput("");
-setMode("text");
-setLanguage("javascript");
+        return;
+    }
+
+    const payload = {
+        channelId: currentChannel.id,
+        type: mode === "code" ? "code_snippet" : "text",
+        content: trimmed,
+        language: mode === "code" ? codeLanguage : undefined
     };
+
+    socket.emit("chat_message", payload);
+
+    setInput("");
+
+    // Return to text mode after sending code
+    if (mode === "code") {
+        setMode("text");
+        setCodeLanguage("text");
+    }
+};
+
+
+    
 
 useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -149,11 +177,7 @@ useInput((input, key) => {
         return;
     }
 
-    if (key.ctrl && input === "g") {
-        setMode(prev =>
-            prev === "text" ? "code" : "text"
-        );
-    }
+    
 });
 
     return (
@@ -168,13 +192,15 @@ useInput((input, key) => {
     — #{currentChannel?.name ?? "Loading..."}
 </Text>
             </Box>
-            <Box>
- <Text color={mode === "code" ? "cyan" : "green"}>
-    {mode === "code"
-        ? `Mode: CODE (${language})`
-        : "Mode: TEXT"}
+            <Text>
+    MODE: {mode.toUpperCase()}
+    {mode === "code" && ` (${codeLanguage})`}
 </Text>
-</Box>
+{status && (
+    <Text color="green">
+        {status}
+    </Text>
+)}
 
             {/* Messages */}
             <Box
@@ -204,7 +230,7 @@ useInput((input, key) => {
             <Box borderStyle="single" paddingX={1}>
                 <Text color="cyan">
     {mode === "code"
-        ? `[${language}] `
+        ? `[${codeLanguage}] `
         : "> "}
 </Text>
 
