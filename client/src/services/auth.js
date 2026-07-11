@@ -2,11 +2,18 @@ import fs from 'fs';
 import path from 'path';
 import http from 'http';
 import open from 'open';
-
+/*
 const TOKEN_PATH = path.join(
     process.env.HOME || process.env.USERPROFILE,
     '.terminal-chat-token'
 );
+*/
+const TOKEN_PATH =
+    process.env.TOKEN_PATH ||
+    path.join(
+        process.env.HOME || process.env.USERPROFILE,
+        '.terminal-chat-token'
+    );
 
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3000';
 

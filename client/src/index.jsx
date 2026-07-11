@@ -8,6 +8,40 @@ import { getToken, startAuthFlow } from './services/auth.js';
 import { connectSocket } from './services/socket.js';
 
 
+const renderMessageContent = (msg) => {
+    const isSnippet = msg.type === "code_snippet";
+
+    if (!isSnippet) {
+        return <Text>{msg.content}</Text>;
+    }
+
+    
+
+    return (
+        <Box flexDirection="column" marginTop={0}>
+        
+            <Text color="yellow" bold>
+                [{language}]
+            </Text>
+            <Box
+                borderStyle="round"
+                borderColor="yellow"
+                paddingX={1}
+                paddingY={0}
+                flexDirection="column"
+            >
+                {String(content)
+                    .split('\n')
+                    .map((line, index) => (
+                        <Text key={`${msg.id}-code-${index}`} color="yellow">
+                            {line === '' ? ' ' : line}
+                        </Text>
+                    ))}
+            </Box>
+        </Box>
+    );
+};
+
 const App = () => {
     const [token, setToken] = useState(getToken());
     const [socket, setSocket] = useState(null);
@@ -15,6 +49,8 @@ const App = () => {
 
     const [input, setInput] = useState('');
     const [currentChannel, setCurrentChannel] = useState(null);
+    const [mode, setMode] = useState("text");
+    const [language, setLanguage] = useState("javascript");
     const { exit } = useApp();
 
 
@@ -64,41 +100,61 @@ const App = () => {
     
 
     const sendMessage = (value) => {
-        process.stderr.write("REACHEDDDD\n");
+        //process.stderr.write("REACHEDDDD\n");
         if (!value.trim()) return;
         if (!socket) {
             process.stderr.write("sendMessage blocked: socket not ready\n");
             return;
         }
 
-        const isCode = value.startsWith('```');
+        //const snippet = parseSnippet(value);
+        //const isCode = Boolean(snippet);
         if (!currentChannel) {
             process.stderr.write("sendMessage blocked: no current channel yet\n");
             return;
         }
+       const payload =
+    mode === "text"
+        ? {
+              channelId: currentChannel.id,
+              type: "text",
+              content: value
+          }
+        : {
+              channelId: currentChannel.id,
+              type: "code_snippet",
+              language,
+              content: value
+          };
+
+socket.emit("message:send", payload);
+/*
 
         socket.emit('message:send', {
             channelId: currentChannel.id,
-            content: isCode
-                ? value
-                      .replace(/```(\w*)\n?/, '')
-                      .replace(/```$/, '')
-                : value,
+            content: isCode ? snippet.content : value,
             type: isCode ? 'code_snippet' : 'text',
-            language: isCode
-                ? (value.match(/```(\w+)/) || [])[1]
-                : null,
+            language: isCode ? snippet.language : null,
         });
+        */
 
-        setInput('');
+        setInput("");
+setMode("text");
+setLanguage("javascript");
     };
 
-    useInput((input, key) => {
-         process.stderr.write(`key: ${JSON.stringify(key)}\n`);
-        if (key.ctrl && input === 'c') {
-            exit();
-        }
-    });
+useInput((input, key) => {
+    if (key.ctrl && input === "c") {
+        exit();
+        return;
+    }
+
+    if (key.ctrl && input === "g") {
+        setMode(prev =>
+            prev === "text" ? "code" : "text"
+        );
+    }
+});
 
     return (
         <Box flexDirection="column" height={process.stdout.rows}>
@@ -112,6 +168,13 @@ const App = () => {
     — #{currentChannel?.name ?? "Loading..."}
 </Text>
             </Box>
+            <Box>
+ <Text color={mode === "code" ? "cyan" : "green"}>
+    {mode === "code"
+        ? `Mode: CODE (${language})`
+        : "Mode: TEXT"}
+</Text>
+</Box>
 
             {/* Messages */}
             <Box
@@ -132,20 +195,18 @@ const App = () => {
                             ).toLocaleTimeString()}{' '}
                         </Text>
 
-                        {msg.type === 'code_snippet' ? (
-                            <Text color="yellow">
-                                [{msg.language || 'code'}] {msg.content}
-                            </Text>
-                        ) : (
-                            <Text>{msg.content}</Text>
-                        )}
+                        {renderMessageContent(msg)}
                     </Box>
                 ))}
             </Box>
 
             {/* Input */}
             <Box borderStyle="single" paddingX={1}>
-                <Text color="green">❯ </Text>
+                <Text color="cyan">
+    {mode === "code"
+        ? `[${language}] `
+        : "> "}
+</Text>
 
                 <TextInput
                     value={input}
