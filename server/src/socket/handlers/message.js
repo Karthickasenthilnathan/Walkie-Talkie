@@ -6,24 +6,29 @@ export default (io, socket, publisher) => {
     //channel message
     socket.on('message:send', async ({ channelId, content, type = 'text', language }) => {
 
-        const result = await db.query(
-            `INSERT INTO messages(sender_id, channel_id, content, type, language)
-             VALUES ($1,$2,$3,$4,$5)
-             RETURNING *`,
-            [userId, channelId, content, type, language]
-        );
+    const result = await db.query(
+        `INSERT INTO messages(sender_id, channel_id, content, type, language)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING *`,
+        [userId, channelId, content, type, language]
+    );
 
-        const msg = result.rows[0];
+    const msg = result.rows[0];
 
-        await publisher.publish(
-            'chat',
-            JSON.stringify({
-                room: `channel:${channelId}`,
-                event: 'message:new',
-                payload: msg,
-            })
-        );
-    });
+    const realtimeMessage = {
+        ...msg,
+        username: socket.user.username,
+    };
+
+    await publisher.publish(
+        'chat',
+        JSON.stringify({
+            room: `channel:${channelId}`,
+            event: 'message:new',
+            payload: realtimeMessage,
+        })
+    );
+});
 
     //logic for dming each other
     socket.on('dm:send', async ({ toUserId, content, type = 'text', language }) => {
@@ -43,12 +48,17 @@ export default (io, socket, publisher) => {
             .sort()
             .join(':');
 
+        const realtimeMessage = {
+            ...msg,
+            username: socket.user.username,
+        };
+
         await publisher.publish(
             'chat',
             JSON.stringify({
                 room: `dm:${dmRoom}`,
                 event: 'dm:new',
-                payload: msg
+                payload: realtimeMessage
             })
         );
     });

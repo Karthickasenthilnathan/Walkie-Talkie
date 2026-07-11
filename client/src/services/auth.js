@@ -28,7 +28,10 @@ export const startAuthFlow = () =>
             const url = new URL(req.url, 'http://localhost:9876');
             const token = url.searchParams.get('token');
 
+            console.error(`[auth] callback hit: ${url.pathname}${url.search}`);
+
             if (token) {
+                console.error('[auth] token received, saving and resolving');
                 saveToken(token);
 
                 res.end(
@@ -44,6 +47,9 @@ export const startAuthFlow = () =>
 
         server.listen(9876);
 
-        console.log('Opening GitHub OAuth authentication page...');
-        open(`${SERVER_URL}/auth/github`);
+        console.error(`[auth] opening ${SERVER_URL}/auth/github`);
+
+        open(`${SERVER_URL}/auth/github`).catch((err) => {
+            console.error('[auth] failed to open browser:', err);
+        });
     });

@@ -24,8 +24,11 @@ const auth = (req, res, next) => {
     }
 };
 
-router.get('/channels', auth, async (req, res) => {
-    const result = await db.query('SELECT * from channels order by name');
+router.get("/channels", async (req, res) => {
+    const result = await db.query(
+        "SELECT id, name FROM channels ORDER BY name"
+    );
+
     res.json(result.rows);
 });
 

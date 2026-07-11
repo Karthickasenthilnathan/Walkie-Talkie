@@ -7,6 +7,7 @@ import TextInput from 'ink-text-input';
 import { getToken, startAuthFlow } from './services/auth.js';
 import { connectSocket } from './services/socket.js';
 
+
 const App = () => {
     const [token, setToken] = useState(getToken());
     const [socket, setSocket] = useState(null);
@@ -15,6 +16,9 @@ const App = () => {
     const [input, setInput] = useState('');
     const [currentChannel, setCurrentChannel] = useState(null);
     const { exit } = useApp();
+
+
+    
 
     useEffect(() => {
         if (!token) {
@@ -26,17 +30,52 @@ const App = () => {
 
         setSocket(s);
 
+        s.on("connect_error", (err) => {
+            process.stderr.write(`Connect error: ${err.message}\n`);
+            process.stderr.write(`${JSON.stringify(err)}\n`);
+        });
+
+        s.on("connect", () => {
+            process.stderr.write("Connected!\n");
+            s.emit("channels:list");
+        });
+
+        s.on("channels:list", (channels) => {
+            process.stderr.write(
+                `Channels: ${JSON.stringify(channels)}\n`
+            );
+
+            if (channels.length > 0) {
+                setCurrentChannel(channels[0]);
+
+                // Join the first available channel so Enter can send immediately.
+                s.emit("channel:join", channels[0].id);
+            }
+        });
+
+
+
         s.on('message:new', (msg) => {
             setMessages((prev) => [...prev.slice(-100), msg]);
         });
 
         return () => s.disconnect();
     }, [token]);
+    
 
     const sendMessage = (value) => {
-        if (!value.trim() || !socket) return;
+        process.stderr.write("REACHEDDDD\n");
+        if (!value.trim()) return;
+        if (!socket) {
+            process.stderr.write("sendMessage blocked: socket not ready\n");
+            return;
+        }
 
         const isCode = value.startsWith('```');
+        if (!currentChannel) {
+            process.stderr.write("sendMessage blocked: no current channel yet\n");
+            return;
+        }
 
         socket.emit('message:send', {
             channelId: currentChannel.id,
@@ -55,6 +94,7 @@ const App = () => {
     };
 
     useInput((input, key) => {
+         process.stderr.write(`key: ${JSON.stringify(key)}\n`);
         if (key.ctrl && input === 'c') {
             exit();
         }
@@ -67,7 +107,10 @@ const App = () => {
                 <Text bold color="green">
                     ⬡ terminal-chat
                 </Text>
-                <Text> — #{currentChannel}</Text>
+               <Text>
+    {" "}
+    — #{currentChannel?.name ?? "Loading..."}
+</Text>
             </Box>
 
             {/* Messages */}

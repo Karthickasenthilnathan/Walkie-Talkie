@@ -52,7 +52,7 @@ router.get('/github/callback', async (req,res) =>{
   const token = jwt.sign(
     {
       userId: user.id,
-      userName: user.username,
+      username: user.username,
     },
     jwtSecret,
     {
