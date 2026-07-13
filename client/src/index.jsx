@@ -1,63 +1,174 @@
 #!/usr/bin/env node
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
-import TextInput from 'ink-text-input';
 
 import { getToken, startAuthFlow } from './services/auth.js';
 import { connectSocket } from './services/socket.js';
 
+const INDENT = '    ';
 
-const renderMessageContent = (msg) => {
-    const isSnippet = msg.type === "code_snippet";
+const tokenizeCodeLine = (line) => {
+    const tokens = [];
+    const regex = /(\/\/.*$)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|true|false|null|undefined|new|class|import|from|export|async|await|try|catch|throw|extends)\b)|(\b\d+(?:\.\d+)?\b)|([{}()[\];,.\-+*/%=<>!?:])/g;
+    let lastIndex = 0;
+    let match;
 
-    if (!isSnippet) {
-        return <Text>{msg.content}</Text>;
+    while ((match = regex.exec(line)) !== null) {
+        if (match.index > lastIndex) {
+            tokens.push({ text: line.slice(lastIndex, match.index), color: undefined });
+        }
+
+        if (match[1]) tokens.push({ text: match[1], color: 'gray' });
+        else if (match[2]) tokens.push({ text: match[2], color: 'green' });
+        else if (match[3]) tokens.push({ text: match[3], color: 'cyan' });
+        else if (match[4]) tokens.push({ text: match[4], color: 'yellow' });
+        else if (match[5]) tokens.push({ text: match[5], color: 'magenta' });
+
+        lastIndex = regex.lastIndex;
     }
 
-    const language = msg.language || "text";
-    const content = msg.content;
+    if (lastIndex < line.length) {
+        tokens.push({ text: line.slice(lastIndex), color: undefined });
+    }
 
-    return (
-        <Box flexDirection="column" marginTop={0}>
-        
-            <Text color="yellow" bold>
-                [{language}]
-            </Text>
-            <Box
-                borderStyle="round"
-                borderColor="yellow"
-                paddingX={1}
-                paddingY={0}
-                flexDirection="column"
-            >
-                {String(content)
-                    .split('\n')
-                    .map((line, index) => (
-                        <Text key={`${msg.id}-code-${index}`} color="yellow">
-                            {line === '' ? ' ' : line}
-                        </Text>
-                    ))}
-            </Box>
-        </Box>
-    );
+    return tokens.length > 0 ? tokens : [{ text: '', color: undefined }];
+};
+
+const getIndentForNextLine = (line) => {
+    const base = line.match(/^\s*/)?.[0] ?? '';
+    const trimmed = line.trimEnd();
+    if (/[{[(]$/.test(trimmed)) {
+        return base + INDENT;
+    }
+    return base;
+};
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const createEditorState = (initialValue = '') => {
+    const lines = initialValue.length > 0 ? initialValue.split('\n') : [''];
+    return { lines, row: 0, col: lines[0]?.length ?? 0 };
+};
+
+const getEditorText = (editor) => editor.lines.join('\n');
+
+const setCursorToEnd = (lines) => ({
+    lines,
+    row: lines.length - 1,
+    col: lines[lines.length - 1]?.length ?? 0,
+});
+
+const insertText = (editor, text) => {
+    const lines = [...editor.lines];
+    const current = lines[editor.row] ?? '';
+    const before = current.slice(0, editor.col);
+    const after = current.slice(editor.col);
+    const inserted = text.split('\n');
+
+    if (inserted.length === 1) {
+        lines[editor.row] = before + text + after;
+        return { lines, row: editor.row, col: editor.col + text.length };
+    }
+
+    lines[editor.row] = before + inserted[0];
+    let targetRow = editor.row;
+
+    for (let i = 1; i < inserted.length; i += 1) {
+        targetRow += 1;
+        lines.splice(targetRow, 0, inserted[i]);
+    }
+
+    lines[targetRow] = lines[targetRow] + after;
+    return { lines, row: targetRow, col: inserted[inserted.length - 1].length };
+};
+
+const backspace = (editor) => {
+    if (editor.col > 0) {
+        const lines = [...editor.lines];
+        const line = lines[editor.row];
+        lines[editor.row] = line.slice(0, editor.col - 1) + line.slice(editor.col);
+        return { lines, row: editor.row, col: editor.col - 1 };
+    }
+
+    if (editor.row > 0) {
+        const lines = [...editor.lines];
+        const prevLine = lines[editor.row - 1];
+        const current = lines[editor.row];
+        const col = prevLine.length;
+        lines[editor.row - 1] = prevLine + current;
+        lines.splice(editor.row, 1);
+        return { lines, row: editor.row - 1, col };
+    }
+
+    return editor;
+};
+
+const deleteForward = (editor) => {
+    const lines = [...editor.lines];
+    const line = lines[editor.row];
+
+    if (editor.col < line.length) {
+        lines[editor.row] = line.slice(0, editor.col) + line.slice(editor.col + 1);
+        return { lines, row: editor.row, col: editor.col };
+    }
+
+    if (editor.row < lines.length - 1) {
+        lines[editor.row] = line + lines[editor.row + 1];
+        lines.splice(editor.row + 1, 1);
+        return { lines, row: editor.row, col: editor.col };
+    }
+
+    return editor;
+};
+
+const moveCursor = (editor, rowDelta, colDelta) => {
+    const row = clamp(editor.row + rowDelta, 0, editor.lines.length - 1);
+    const col = clamp(editor.col + colDelta, 0, editor.lines[row].length);
+    return { ...editor, row, col };
+};
+
+const moveHome = (editor) => {
+    const line = editor.lines[editor.row];
+    const firstContent = line.search(/\S|$/);
+    const target = editor.col === firstContent ? 0 : firstContent;
+    return { ...editor, col: target };
+};
+
+const moveEnd = (editor) => ({
+    ...editor,
+    col: editor.lines[editor.row].length,
+});
+
+const detectBracketPair = (ch) => ({ '(': ')', '[': ']', '{': '}' }[ch]);
+
+const findMatchingBracket = (text, startIndex) => {
+    const open = text[startIndex];
+    const close = detectBracketPair(open);
+    if (!close) return null;
+
+    const direction = 1;
+    let depth = 0;
+    for (let i = startIndex; i < text.length; i += 1) {
+        const ch = text[i];
+        if (ch === open) depth += 1;
+        if (ch === close) depth -= 1;
+        if (depth === 0) return i;
+    }
+    return null;
 };
 
 const App = () => {
     const [token, setToken] = useState(getToken());
     const [socket, setSocket] = useState(null);
     const [messages, setMessages] = useState([]);
-
-    const [input, setInput] = useState('');
+    const [inputMode, setInputMode] = useState('text');
+    const [editor, setEditor] = useState(createEditorState(''));
     const [currentChannel, setCurrentChannel] = useState(null);
-    const [mode, setMode] = useState("text");
-    
-    const [status, setStatus] = useState("");
-    const [codeLanguage, setCodeLanguage] = useState("text");
+    const [mode, setMode] = useState('text');
+    const [status, setStatus] = useState('');
+    const [codeLanguage, setCodeLanguage] = useState('text');
     const { exit } = useApp();
-
-
-    
 
     useEffect(() => {
         if (!token) {
@@ -66,180 +177,345 @@ const App = () => {
         }
 
         const s = connectSocket(token);
-
         setSocket(s);
 
-        s.on("connect_error", (err) => {
+        s.on('connect_error', (err) => {
             process.stderr.write(`Connect error: ${err.message}\n`);
             process.stderr.write(`${JSON.stringify(err)}\n`);
         });
 
-        s.on("connect", () => {
-            process.stderr.write("Connected!\n");
-            s.emit("channels:list");
+        s.on('connect', () => {
+            process.stderr.write('Connected!\n');
+            s.emit('channels:list');
         });
 
-        s.on("channels:list", (channels) => {
-            process.stderr.write(
-                `Channels: ${JSON.stringify(channels)}\n`
-            );
-
+        s.on('channels:list', (channels) => {
+            process.stderr.write(`Channels: ${JSON.stringify(channels)}\n`);
             if (channels.length > 0) {
                 setCurrentChannel(channels[0]);
-
-                // Join the first available channel so Enter can send immediately.
-                s.emit("channel:join", channels[0].id);
+                s.emit('channel:join', channels[0].id);
             }
         });
 
-
-
         s.on('message:new', (msg) => {
+            process.stderr.write(JSON.stringify(msg, null, 2) + '\n');
             setMessages((prev) => [...prev.slice(-100), msg]);
         });
 
         return () => s.disconnect();
     }, [token]);
-    
-    const handleCommand = (input) => {
-    const [cmd, ...args] = input.trim().split(/\s+/);
 
-    switch (cmd.toLowerCase()) {
-        case "/code":
-            if (args.length === 0) {
-                setStatus("Usage: /code <language>");
+    const handleCommand = (value) => {
+        const [cmd, ...args] = value.trim().split(/\s+/);
+        switch (cmd.toLowerCase()) {
+            case '/code':
+                if (args.length === 0) {
+                    setStatus('Usage: /code <language>');
+                    break;
+                }
+                setCodeLanguage(args[0].toLowerCase());
+                setMode('code');
+                setInputMode('code');
+                setEditor(createEditorState(''));
+                setStatus(`Switched to Code Mode (${args[0]})`);
                 break;
-            }
-
-            setCodeLanguage(args[0].toLowerCase());
-            setMode("code");
-            setStatus(`Switched to Code Mode (${args[0]})`);
-            break;
-
-        case "/text":
-            setMode("text");
-            setCodeLanguage("text");
-            setStatus("Switched to Text Mode");
-            break;
-
-        default:
-            setStatus(`Unknown command: ${cmd}`);
-    }
-
-    setTimeout(() => setStatus(""), 2000);
-};
-    const sendMessage = (value) => {
-    const trimmed = value.trim();
-
-    if (!trimmed) return;
-
-    if (!socket) {
-        process.stderr.write("Socket not ready\n");
-        return;
-    }
-
-    if (!currentChannel) {
-        process.stderr.write("No channel selected\n");
-        return;
-    }
-
-    // Handle commands
-    if (trimmed.startsWith("/")) {
-        handleCommand(trimmed);
-        setInput("");
-        return;
-    }
-
-    const payload = {
-        channelId: currentChannel.id,
-        type: mode === "code" ? "code_snippet" : "text",
-        content: trimmed,
-        language: mode === "code" ? codeLanguage : undefined
+            case '/text':
+                setMode('text');
+                setCodeLanguage('text');
+                setInputMode('text');
+                setEditor(createEditorState(''));
+                setStatus('Switched to Text Mode');
+                break;
+            default:
+                setStatus(`Unknown command: ${cmd}`);
+        }
+        setTimeout(() => setStatus(''), 2000);
     };
 
-    socket.emit("chat_message", payload);
+    const sendMessage = (value) => {
+        const rawValue = value;
+        const trimmed = rawValue.trim();
+        if (!trimmed) return;
+        if (!socket) {
+            process.stderr.write('Socket not ready\n');
+            return;
+        }
+        if (!currentChannel) {
+            process.stderr.write('No channel selected\n');
+            return;
+        }
+        if (trimmed.startsWith('/')) {
+            handleCommand(trimmed);
+            setEditor(createEditorState(''));
+            return;
+        }
 
-    setInput("");
+        const payload = {
+            channelId: currentChannel.id,
+            type: mode === 'code' ? 'code_snippet' : 'text',
+            content: rawValue,
+            language: mode === 'code' ? codeLanguage : undefined,
+        };
 
-    // Return to text mode after sending code
-    if (mode === "code") {
-        setMode("text");
-        setCodeLanguage("text");
-    }
-};
+        socket.emit('message:send', payload);
+        setEditor(createEditorState(''));
+    };
 
+    const codePreview = useMemo(() => {
+        if (mode !== 'code') return null;
+        const currentLine = editor.lines[editor.row] ?? '';
+        const bracketIndex = editor.col > 0 ? findMatchingBracket(currentLine, editor.col - 1) : null;
+        return { currentLine, bracketIndex };
+    }, [editor, mode]);
 
-    
+    useInput((input, key) => {
+        if (key.ctrl && input === 'c') {
+            exit();
+            return;
+        }
 
-useInput((input, key) => {
-    if (key.ctrl && input === "c") {
-        exit();
-        return;
-    }
+        if (inputMode === 'text') {
+            if (key.return) {
+                sendMessage(getEditorText(editor));
+                return;
+            }
+            if (key.backspace) {
+                setEditor(backspace(editor));
+                return;
+            }
+            if (key.leftArrow) {
+                setEditor(moveCursor(editor, 0, -1));
+                return;
+            }
+            if (key.rightArrow) {
+                setEditor(moveCursor(editor, 0, 1));
+                return;
+            }
+            if (key.upArrow) {
+                setEditor(moveCursor(editor, -1, 0));
+                return;
+            }
+            if (key.downArrow) {
+                setEditor(moveCursor(editor, 1, 0));
+                return;
+            }
+            if (input) {
+                setEditor(insertText(editor, input));
+            }
+            return;
+        }
 
-    
-});
+        if (key.escape) {
+            setEditor(createEditorState(''));
+            setStatus('Code draft cleared');
+            setTimeout(() => setStatus(''), 1200);
+            return;
+        }
+
+        if (key.ctrl && input === 'd') {
+            sendMessage(getEditorText(editor));
+            return;
+        }
+
+        if (key.return) {
+            const currentLine = editor.lines[editor.row] ?? '';
+            const before = currentLine.slice(0, editor.col);
+            const after = currentLine.slice(editor.col);
+            const indentation = getIndentForNextLine(before);
+            const nextEditor = insertText(editor, `\n${indentation}`);
+            const updatedLines = [...nextEditor.lines];
+            updatedLines[nextEditor.row] = updatedLines[nextEditor.row] + after;
+            setEditor({
+                lines: updatedLines,
+                row: nextEditor.row,
+                col: indentation.length,
+            });
+            return;
+        }
+
+        if (key.tab) {
+            setEditor(insertText(editor, INDENT));
+            return;
+        }
+
+        if (key.backspace) {
+            setEditor(backspace(editor));
+            return;
+        }
+
+        if (key.delete) {
+            setEditor(deleteForward(editor));
+            return;
+        }
+
+        if (key.leftArrow) {
+            if (editor.col > 0) {
+                setEditor({ ...editor, col: editor.col - 1 });
+                return;
+            }
+            if (editor.row > 0) {
+                const prevRow = editor.row - 1;
+                setEditor({
+                    ...editor,
+                    row: prevRow,
+                    col: editor.lines[prevRow].length,
+                });
+            }
+            return;
+        }
+
+        if (key.rightArrow) {
+            const line = editor.lines[editor.row];
+            if (editor.col < line.length) {
+                setEditor({ ...editor, col: editor.col + 1 });
+                return;
+            }
+            if (editor.row < editor.lines.length - 1) {
+                setEditor({ ...editor, row: editor.row + 1, col: 0 });
+            }
+            return;
+        }
+
+        if (key.upArrow) {
+            const row = Math.max(0, editor.row - 1);
+            const col = clamp(editor.col, 0, editor.lines[row].length);
+            setEditor({ ...editor, row, col });
+            return;
+        }
+
+        if (key.downArrow) {
+            const row = Math.min(editor.lines.length - 1, editor.row + 1);
+            const col = clamp(editor.col, 0, editor.lines[row].length);
+            setEditor({ ...editor, row, col });
+            return;
+        }
+
+        if (key.home) {
+            setEditor(moveHome(editor));
+            return;
+        }
+
+        if (key.end) {
+            setEditor(moveEnd(editor));
+            return;
+        }
+
+        if (input) {
+            setEditor(insertText(editor, input));
+        }
+    });
+
+    const renderEditorLine = (line, index) => {
+        const isCurrent = index === editor.row;
+        const cursorCol = isCurrent ? editor.col : -1;
+        const tokens = tokenizeCodeLine(line);
+
+        return (
+            <Box key={`editor-line-${index}`}>
+                <Text color={isCurrent ? 'cyan' : 'gray'}>
+                    {String(index + 1).padStart(3, ' ')} |
+                </Text>
+                <Text> </Text>
+                <Box>
+                    {tokens.map((token, tokenIndex) => {
+                        const beforeCursor = isCurrent && cursorCol >= 0 && cursorCol <= line.length && token.text.length > 0;
+                        return (
+                            <Text key={`${index}-${tokenIndex}`} color={token.color}>
+                                {token.text}
+                            </Text>
+                        );
+                    })}
+                    {isCurrent && cursorCol === line.length ? <Text inverse> </Text> : null}
+                </Box>
+            </Box>
+        );
+    };
+
+    const editorBoxHeight = Math.max(4, Math.min(12, process.stdout.rows ? process.stdout.rows - 12 : 8));
 
     return (
         <Box flexDirection="column" height={process.stdout.rows}>
-            {/* Header */}
             <Box borderStyle="single" paddingX={1}>
                 <Text bold color="green">
                     ⬡ terminal-chat
                 </Text>
-               <Text>
-    {" "}
-    — #{currentChannel?.name ?? "Loading..."}
-</Text>
+                <Text>{' '}— #{currentChannel?.name ?? 'Loading...'}</Text>
             </Box>
+
             <Text>
-    MODE: {mode.toUpperCase()}
-    {mode === "code" && ` (${codeLanguage})`}
-</Text>
-{status && (
-    <Text color="green">
-        {status}
-    </Text>
-)}
+                MODE: {mode.toUpperCase()}
+                {mode === 'code' && ` (${codeLanguage})`}
+            </Text>
+            {status && <Text color="green">{status}</Text>}
 
-            {/* Messages */}
-            <Box
-                flexDirection="column"
-                flexGrow={1}
-                paddingX={1}
-                overflowY="hidden"
-            >
+            <Box flexDirection="column" flexGrow={1} paddingX={1} overflowY="hidden">
                 {messages.map((msg) => (
-                    <Box key={msg.id}>
-                        <Text color="cyan">
-                            {msg.username}{' '}
-                        </Text>
-
-                        <Text dimColor>
-                            {new Date(
-                                msg.created_at
-                            ).toLocaleTimeString()}{' '}
-                        </Text>
-
-                        {renderMessageContent(msg)}
+                    <Box key={msg.id} flexDirection="column">
+                        <Box>
+                            <Text color="cyan" bold>
+                                {msg.username}
+                            </Text>
+                            <Text dimColor>
+                                {'  '}
+                                {new Date(msg.created_at).toLocaleTimeString()}
+                            </Text>
+                        </Box>
+                        <Box paddingLeft={2}>
+                            {msg.type === 'code_snippet' ? (
+                                <Box flexDirection="column">
+                                    <Text color="yellow" bold>
+                                        [{msg.language || 'text'}]
+                                    </Text>
+                                    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
+                                        {String(msg.content)
+                                            .split('\n')
+                                            .map((line, index) => (
+                                                <Text key={`${msg.id}-code-${index}`} color="yellow">
+                                                    {line === '' ? ' ' : line}
+                                                </Text>
+                                            ))}
+                                    </Box>
+                                </Box>
+                            ) : (
+                                <Text>{msg.content}</Text>
+                            )}
+                        </Box>
                     </Box>
                 ))}
             </Box>
 
-            {/* Input */}
-            <Box borderStyle="single" paddingX={1}>
+            <Box borderStyle="single" paddingX={1} flexDirection="column">
                 <Text color="cyan">
-    {mode === "code"
-        ? `[${codeLanguage}] `
-        : "> "}
-</Text>
-
-                <TextInput
-                    value={input}
-                    onChange={setInput}
-                    onSubmit={sendMessage}
-                />
+                    {mode === 'code' ? `[${codeLanguage}] ` : '> '}
+                    {mode === 'code' ? 'Ctrl+D send, Esc clear, Tab indent' : 'Enter send'}
+                </Text>
+                <Box flexDirection="column" height={editorBoxHeight} overflowY="hidden">
+                    {mode === 'code'
+                        ? editor.lines.map((line, index) => renderEditorLine(line, index))
+                        : (
+                            <Box>
+                                <Text>{editor.lines[0] ?? ''}</Text>
+                                <Text inverse>{' '}</Text>
+                            </Box>
+                        )}
+                </Box>
             </Box>
+
+            {editor.lines.some((line) => line.length > 0) && (
+                <Box paddingX={1}>
+                    <Text dimColor>
+                        Draft: {getEditorText(editor)}
+                    </Text>
+                </Box>
+            )}
+
+            {mode === 'code' && codePreview?.bracketIndex !== null && (
+                <Box paddingX={1}>
+                    <Text dimColor>
+                        Bracket match on line {editor.row + 1}
+                    </Text>
+                </Box>
+            )}
         </Box>
     );
 };
