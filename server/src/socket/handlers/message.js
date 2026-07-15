@@ -4,6 +4,31 @@ export default (io, socket, publisher) => {
     const { userId } = socket.user; //js object destructuring. grabs the userid from the user who has undergone jwt authentication
 
     //channel message
+    socket.on("resume", async ({ lastCursor }) => {
+
+    if (lastCursor == null) {
+    socket.data.caughtUp = true;
+    socket.emit("resume_complete");
+    return;
+}
+
+    const result = await pool.query(
+        `
+        SELECT *
+        FROM messages
+        WHERE seq > $1
+        ORDER BY seq ASC
+        `,
+        [lastCursor]
+    );
+
+    for (const message of result.rows) {
+        socket.emit("message:new", message);
+    }
+    socket.data.caughtUp = true;
+
+    socket.emit("resume_complete");
+});
     socket.on('message:send', async ({ channelId, content, type = 'text', language }) => {
 
     const result = await db.query(

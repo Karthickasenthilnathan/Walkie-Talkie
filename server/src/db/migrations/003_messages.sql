@@ -2,6 +2,7 @@ CREATE TYPE message_type AS ENUM ('text', 'code_snippet', 'file');
 
 CREATE TABLE messages (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq BIGSERIAL UNIQUE,
   sender_id   UUID REFERENCES users(id),
   channel_id  UUID REFERENCES channels(id),        -- NULL if DM
   dm_to       UUID REFERENCES users(id),           -- NULL if channel message

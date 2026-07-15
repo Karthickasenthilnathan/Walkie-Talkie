@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState,useRef } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 
 import { getToken, startAuthFlow } from './services/auth.js';
@@ -168,7 +168,9 @@ const App = () => {
     const [mode, setMode] = useState('text');
     const [status, setStatus] = useState('');
     const [codeLanguage, setCodeLanguage] = useState('text');
+    const lastCursor = useRef(null);
     const { exit } = useApp();
+    
 
     useEffect(() => {
         if (!token) {
@@ -184,10 +186,19 @@ const App = () => {
             process.stderr.write(`${JSON.stringify(err)}\n`);
         });
 
-        s.on('connect', () => {
-            process.stderr.write('Connected!\n');
-            s.emit('channels:list');
-        });
+       s.on('connect', () => {
+    process.stderr.write('Connected!\n');
+
+   s.emit("resume", {
+    channelId: currentChannel?.id,
+    lastCursor: lastCursor.current,
+});
+s.on("resume_complete", () => {
+    console.log("Replay finished.");
+});
+
+    s.emit('channels:list');
+});
 
         s.on('channels:list', (channels) => {
             process.stderr.write(`Channels: ${JSON.stringify(channels)}\n`);
@@ -198,9 +209,12 @@ const App = () => {
         });
 
         s.on('message:new', (msg) => {
-            process.stderr.write(JSON.stringify(msg, null, 2) + '\n');
-            setMessages((prev) => [...prev.slice(-100), msg]);
-        });
+    process.stderr.write(JSON.stringify(msg, null, 2) + '\n');
+
+    setMessages((prev) => [...prev.slice(-100), msg]);
+
+    lastCursor.current = msg.seq;
+});
 
         return () => s.disconnect();
     }, [token]);
@@ -256,6 +270,7 @@ const App = () => {
             content: rawValue,
             language: mode === 'code' ? codeLanguage : undefined,
         };
+        
 
         socket.emit('message:send', payload);
         setEditor(createEditorState(''));

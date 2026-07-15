@@ -15,15 +15,29 @@ export default (httpServer) => {
     });
 
     io.use(authMiddleware); //authenticating users
+    
 
     subscriber.subscribe('chat', (message) => { //subscribe is a method in redis, arrow function is a callback
         const data = JSON.parse(message);
 
-        io.to(data.room).emit(data.event, data.payload);
+        const room = io.sockets.adapter.rooms.get(data.room);
+
+if (!room) return;
+
+for (const socketId of room) {
+    const socket = io.sockets.sockets.get(socketId);
+
+    if (!socket) continue;
+
+    if (!socket.data.caughtUp) continue;
+
+    socket.emit(data.event, data.payload);
+}
     });
 
     io.on('connection', async (socket) => {
         const { userId, username } = socket.user; //object destructuring
+        socket.data.caughtUp = false;
 
         console.log(`${username} connected`);
 
