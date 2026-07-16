@@ -185,28 +185,29 @@ const App = () => {
             process.stderr.write(`Connect error: ${err.message}\n`);
             process.stderr.write(`${JSON.stringify(err)}\n`);
         });
-
-       s.on('connect', () => {
-    process.stderr.write('Connected!\n');
-
-   s.emit("resume", {
-    channelId: currentChannel?.id,
-    lastCursor: lastCursor.current,
-});
-s.on("resume_complete", () => {
+        s.on("resume_complete", () => {
     console.log("Replay finished.");
 });
 
+       s.on('connect', () => {
+    process.stderr.write('Connected!\n');
     s.emit('channels:list');
 });
 
-        s.on('channels:list', (channels) => {
-            process.stderr.write(`Channels: ${JSON.stringify(channels)}\n`);
-            if (channels.length > 0) {
-                setCurrentChannel(channels[0]);
-                s.emit('channel:join', channels[0].id);
-            }
-        });
+       s.on("channels:list", (channels) => {
+    if (channels.length === 0) return;
+
+    const channel = channels[0];
+
+    setCurrentChannel(channel);
+
+    s.emit("channel:join", channel.id);
+
+    s.emit("resume", {
+        channelId: channel.id,
+        lastCursor: lastCursor.current,
+    });
+});
 
         s.on('message:new', (msg) => {
     process.stderr.write(JSON.stringify(msg, null, 2) + '\n');
