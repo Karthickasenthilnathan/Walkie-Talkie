@@ -200,15 +200,16 @@ const App = () => {
     const channel = channels[0];
 
     setCurrentChannel(channel);
-
     s.emit("channel:join", channel.id);
-
-    s.emit("resume", {
-        channelId: channel.id,
-        lastCursor: lastCursor.current,
-    });
 });
-
+s.on("channel:joined", (channelId) => {
+    if (lastCursor.current != null) {
+        s.emit("resume", {
+            channelId,
+            lastCursor: lastCursor.current,
+        });
+    }
+});
         s.on('message:new', (msg) => {
     process.stderr.write(JSON.stringify(msg, null, 2) + '\n');
 

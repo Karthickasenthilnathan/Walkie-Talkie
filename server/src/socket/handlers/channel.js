@@ -12,6 +12,8 @@ export default (socket) => {
     });
 
     socket.on("channel:join", (channelId) => {
-        socket.join(`channel:${channelId}`);
-    });
+    socket.join(`channel:${channelId}`);
+
+    socket.emit("channel:joined", channelId);
+});
 };

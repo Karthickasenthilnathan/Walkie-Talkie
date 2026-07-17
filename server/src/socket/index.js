@@ -50,6 +50,7 @@ for (const socketId of room) {
 
         socket.on("channel:join", (channelId) => {
     socket.join(`channel:${channelId}`);
+    socket.emit("channel:joined", channelId);
 }); //joins the client's socket to general channel by default
 
         messageHandler(io, socket, publisher);

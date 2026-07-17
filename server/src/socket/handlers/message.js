@@ -3,19 +3,14 @@ import db from '../../config/db.js';
 export default (io, socket, publisher) => {
     const { userId } = socket.user; //js object destructuring. grabs the userid from the user who has undergone jwt authentication
 
-    //channel message
-    socket.on("resume", async ({ channelId, lastCursor }) => {
+// channel message
+socket.on("resume", async ({ channelId, lastCursor }) => {
     try {
         if (!channelId) {
-            socket.emit("resume_complete");
             return;
         }
 
-        if (lastCursor == null) {
-            socket.data.caughtUp = true;
-            socket.emit("resume_complete");
-            return;
-        }
+        
 
         const result = await db.query(
             `
@@ -31,14 +26,12 @@ export default (io, socket, publisher) => {
         for (const message of result.rows) {
             socket.emit("message:new", message);
         }
-
-        socket.data.caughtUp = true;
-        socket.emit("resume_complete");
     } catch (err) {
         console.error("Resume replay failed:", err);
-
-        // Doesn't leave the client waiting forever.
-        socket.data.caughtUp=true
+    } finally {
+        // Always mark the client as caught up and notify it,
+        // regardless of success, missing data, or errors.
+        socket.data.caughtUp = true;
         socket.emit("resume_complete");
     }
 });
