@@ -20,3 +20,6 @@ export const github = {
 };
 export const jwtSecret = process.env.JWT_SECRET;
 export const clientUrl = process.env.CLIENT_URL;
+
+export const messageCacheLimit = Number(process.env.messageCacheLimit) || 100
+export const messageCacheTtlSeconds = Number(process.env.messageCacheTtlSeconds) || 86400

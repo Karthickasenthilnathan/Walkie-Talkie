@@ -1,4 +1,6 @@
 import db from '../../config/db.js';
+import { messageCacheLimit } from '../../config/env.js';
+import { messageCacheTtlSeconds } from '../../config/env.js';
 
 export default (io, socket, publisher) => {
     const { userId } = socket.user; //js object destructuring. grabs the userid from the user who has undergone jwt authentication
@@ -50,7 +52,11 @@ socket.on("resume", async ({ channelId, lastCursor }) => {
         ...msg,
         username: socket.user.username,
     };
-
+    try {
+    await cacheMessage(channelId, realtimeMessage);
+} catch (err) {
+    console.error('Message cache write failed:', err);
+}
     await publisher.publish(
         'chat',
         JSON.stringify({
@@ -93,4 +99,14 @@ socket.on("resume", async ({ channelId, lastCursor }) => {
             })
         );
     });
+    async function cacheMessage(channelId, message){
+        const cacheKey = `channel:${channelId}:recent_messages`
+        await publisher .multi()
+        .zAdd(cacheKey,{
+            score:Number(message.seq),
+            value:JSON.stringify(message)
+        })
+        .zRemRangeByRank(cacheKey,0,-messageCacheLimit-1).expire(cacheKey,messageCacheTtlSeconds)
+        .exec();
+    }
 };

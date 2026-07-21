@@ -203,19 +203,22 @@ const App = () => {
     s.emit("channel:join", channel.id);
 });
 s.on("channel:joined", (channelId) => {
-    if (lastCursor.current != null) {
-        s.emit("resume", {
-            channelId,
-            lastCursor: lastCursor.current,
-        });
-    }
+    s.emit("resume", {
+        channelId,
+        lastCursor: lastCursor.current,
+    });
 });
-        s.on('message:new', (msg) => {
+s.on('message:new', (msg) => {
     process.stderr.write(JSON.stringify(msg, null, 2) + '\n');
 
     setMessages((prev) => [...prev.slice(-100), msg]);
 
-    lastCursor.current = msg.seq;
+    if (
+        msg.seq != null &&
+        (lastCursor.current == null || msg.seq > lastCursor.current)
+    ) {
+        lastCursor.current = msg.seq;
+    }
 });
 
         return () => s.disconnect();
