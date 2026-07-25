@@ -39,6 +39,16 @@ for (const socketId of room) {
         const { userId, username } = socket.user; //object destructuring
         socket.data.caughtUp = false;
 
+        // Register handlers before awaited startup work. The client emits
+        // channels:list as soon as its connect event fires; if Redis is slow,
+        // registering these after sAdd would lose that first request.
+        socket.on("channel:join", (channelId) => {
+            socket.join(`channel:${channelId}`);
+            socket.emit("channel:joined", channelId);
+        });
+        messageHandler(io, socket, publisher);
+        channelHandler(socket);
+
         console.log(`${username} connected`);
 
         await publisher.sAdd(ONLINE_KEY, userId); //pauses until redis adds extracted userId to online_users set. sAdd = Set Add
@@ -47,15 +57,6 @@ for (const socketId of room) {
             userId,
             username
         });
-
-        socket.on("channel:join", (channelId) => {
-    socket.join(`channel:${channelId}`);
-    socket.emit("channel:joined", channelId);
-}); //joins the client's socket to general channel by default
-
-        messageHandler(io, socket, publisher);
-
-        channelHandler(socket);
 
         socket.on('disconnect', async () => {
             await publisher.sRem(ONLINE_KEY, userId); //sRem = Set Remove

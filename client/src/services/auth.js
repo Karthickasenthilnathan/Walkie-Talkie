@@ -29,6 +29,14 @@ export const saveToken = (token) => {
     fs.writeFileSync(TOKEN_PATH, token);
 };
 
+export const clearToken = () => {
+    try {
+        fs.unlinkSync(TOKEN_PATH);
+    } catch {
+        // The token may already be absent.
+    }
+};
+
 export const startAuthFlow = () =>
     new Promise((resolve) => {
         const server = http.createServer((req, res) => {

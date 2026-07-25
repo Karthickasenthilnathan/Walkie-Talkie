@@ -3,10 +3,25 @@
 import React, { useEffect, useMemo, useState,useRef } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 
-import { getToken, startAuthFlow } from './services/auth.js';
+import { clearToken, getToken, startAuthFlow } from './services/auth.js';
 import { connectSocket } from './services/socket.js';
 
 const INDENT = '    ';
+const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
+const MAX_SPAM_MESSAGES = 1000;
+
+const getMessageKey = (message, index) =>
+    message.id ?? message.seq ?? `${message.created_at}-${message.username}-${index}`;
+
+const estimateMessageRows = (message, contentWidth) => {
+    const content = String(message.content ?? '');
+    const lines = content.split('\n');
+    const contentRows = lines.reduce(
+        (total, line) => total + Math.max(1, Math.ceil(line.length / contentWidth)),
+        0,
+    );
+    return 1 + contentRows;
+};
 
 const tokenizeCodeLine = (line) => {
     const tokens = [];
@@ -168,6 +183,8 @@ const App = () => {
     const [mode, setMode] = useState('text');
     const [status, setStatus] = useState('');
     const [codeLanguage, setCodeLanguage] = useState('text');
+    const [channelLoadState, setChannelLoadState] = useState('loading');
+    const [messageScrollOffset, setMessageScrollOffset] = useState(0);
     const lastCursor = useRef(null);
     const { exit } = useApp();
     
@@ -180,27 +197,47 @@ const App = () => {
 
         const s = connectSocket(token);
         setSocket(s);
+        const channelRetryTimers = [];
+        const requestChannels = () => {
+            if (s.connected) s.emit('channels:list');
+        };
 
         s.on('connect_error', (err) => {
-            process.stderr.write(`Connect error: ${err.message}\n`);
-            process.stderr.write(`${JSON.stringify(err)}\n`);
+            if (err.message === 'Invalid Token') {
+                clearToken();
+                s.disconnect();
+                setStatus('Session expired. Starting GitHub login...');
+                setToken(null);
+                return;
+            }
+            setChannelLoadState('error');
+            setStatus(`Connection failed: ${err.message}`);
         });
-        s.on("resume_complete", () => {
-    console.log("Replay finished.");
-});
-
        s.on('connect', () => {
-    process.stderr.write('Connected!\n');
-    s.emit('channels:list');
+    setChannelLoadState('loading');
+    requestChannels();
+    [250, 1000, 2500].forEach((delay) => {
+        channelRetryTimers.push(setTimeout(requestChannels, delay));
+    });
 });
 
        s.on("channels:list", (channels) => {
-    if (channels.length === 0) return;
+    if (!Array.isArray(channels) || channels.length === 0) {
+        setChannelLoadState('empty');
+        setStatus('No channels are available. Press R to retry, or Ctrl+C to exit.');
+        return;
+    }
 
     const channel = channels[0];
 
+    setChannelLoadState('ready');
+    channelRetryTimers.forEach(clearTimeout);
     setCurrentChannel(channel);
     s.emit("channel:join", channel.id);
+});
+s.on('channels:error', (message) => {
+    setChannelLoadState('error');
+    setStatus(`Could not load channels: ${message}. Press R to retry, or Ctrl+C to exit.`);
 });
 s.on("channel:joined", (channelId) => {
     s.emit("resume", {
@@ -209,19 +246,37 @@ s.on("channel:joined", (channelId) => {
     });
 });
 s.on('message:new', (msg) => {
-    process.stderr.write(JSON.stringify(msg, null, 2) + '\n');
-
-    setMessages((prev) => [...prev.slice(-100), msg]);
+    setMessages((prev) => {
+        const identity = msg.id ?? msg.seq ?? `${msg.created_at}-${msg.username}-${msg.content}`;
+        const next = new Map(
+            prev.map((message) => [
+                message.id ?? message.seq ?? `${message.created_at}-${message.username}-${message.content}`,
+                message,
+            ]),
+        );
+        next.set(identity, msg);
+        return [...next.values()]
+            .sort((left, right) => {
+                const leftSeq = Number(left.seq);
+                const rightSeq = Number(right.seq);
+                if (Number.isFinite(leftSeq) && Number.isFinite(rightSeq)) return leftSeq - rightSeq;
+                return new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+            })
+            .slice(-100);
+    });
 
     if (
         msg.seq != null &&
-        (lastCursor.current == null || msg.seq > lastCursor.current)
+        (lastCursor.current == null || Number(msg.seq) > Number(lastCursor.current))
     ) {
         lastCursor.current = msg.seq;
     }
 });
 
-        return () => s.disconnect();
+        return () => {
+            channelRetryTimers.forEach(clearTimeout);
+            s.disconnect();
+        };
     }, [token]);
 
     const handleCommand = (value) => {
@@ -256,13 +311,32 @@ s.on('message:new', (msg) => {
         const trimmed = rawValue.trim();
         if (!trimmed) return;
         if (!socket) {
-            process.stderr.write('Socket not ready\n');
+            setStatus('Socket is not ready yet.');
             return;
         }
         if (!currentChannel) {
-            process.stderr.write('No channel selected\n');
+            setStatus('No channel selected.');
             return;
         }
+
+        const spamMatch = trimmed.match(/^\/spam\s+(\d+)$/i);
+        if (IS_DEVELOPMENT && spamMatch) {
+            const count = clamp(Number(spamMatch[1]), 1, MAX_SPAM_MESSAGES);
+
+            for (let index = 1; index <= count; index += 1) {
+                socket.emit('message:send', {
+                    channelId: currentChannel.id,
+                    type: 'text',
+                    content: `Spam ${index}`,
+                });
+            }
+
+            setStatus(`Sent ${count} development test messages.`);
+            setTimeout(() => setStatus(''), 2000);
+            setEditor(createEditorState(''));
+            return;
+        }
+
         if (trimmed.startsWith('/')) {
             handleCommand(trimmed);
             setEditor(createEditorState(''));
@@ -291,6 +365,39 @@ s.on('message:new', (msg) => {
     useInput((input, key) => {
         if (key.ctrl && input === 'c') {
             exit();
+            return;
+        }
+
+        if ((key.ctrl && key.upArrow) || (key.alt && key.upArrow) || key.pageUp) {
+            setMessageScrollOffset((current) => Math.min(
+                Math.max(0, messages.length - 1),
+                current + Math.max(1, Math.floor(messageViewportHeight / 2)),
+            ));
+            return;
+        }
+
+        if ((key.ctrl && key.downArrow) || (key.alt && key.downArrow) || key.pageDown) {
+            setMessageScrollOffset((current) => Math.max(
+                0,
+                current - Math.max(1, Math.floor(messageViewportHeight / 2)),
+            ));
+            return;
+        }
+
+        if ((channelLoadState === 'empty' || channelLoadState === 'error') && input.toLowerCase() === 'r') {
+            if (!socket) {
+                setStatus('Socket is not ready yet. Press R again in a moment.');
+                return;
+            }
+
+            setChannelLoadState('loading');
+            if (socket.connected) {
+                setStatus('Retrying channel list...');
+                socket.emit('channels:list');
+            } else {
+                setStatus('Reconnecting...');
+                socket.connect();
+            }
             return;
         }
 
@@ -451,7 +558,26 @@ s.on('message:new', (msg) => {
         );
     };
 
-    const editorBoxHeight = Math.max(4, Math.min(12, process.stdout.rows ? process.stdout.rows - 12 : 8));
+    const editorBoxHeight = mode === 'code'
+        ? Math.max(4, Math.min(12, process.stdout.rows ? process.stdout.rows - 12 : 8))
+        : 1;
+    const terminalRows = process.stdout.rows || 24;
+    const terminalColumns = process.stdout.columns || 80;
+    const messageViewportHeight = Math.max(
+        1,
+        terminalRows - editorBoxHeight - 7 - (status ? 1 : 0) - (editor.lines.some((line) => line.length > 0) ? 1 : 0),
+    );
+    const messageWidth = Math.max(20, terminalColumns - 4);
+    const visibleMessages = [];
+    let usedMessageRows = 0;
+    const safeScrollOffset = Math.min(messageScrollOffset, Math.max(0, messages.length - 1));
+    const messageEndIndex = messages.length - safeScrollOffset;
+    for (let index = messageEndIndex - 1; index >= 0; index -= 1) {
+        const messageRows = estimateMessageRows(messages[index], messageWidth);
+        if (visibleMessages.length > 0 && usedMessageRows + messageRows > messageViewportHeight) break;
+        visibleMessages.unshift({ message: messages[index], index });
+        usedMessageRows += messageRows;
+    }
 
     return (
         <Box flexDirection="column" height={process.stdout.rows}>
@@ -468,9 +594,9 @@ s.on('message:new', (msg) => {
             </Text>
             {status && <Text color="green">{status}</Text>}
 
-            <Box flexDirection="column" flexGrow={1} paddingX={1} overflowY="hidden">
-                {messages.map((msg) => (
-                    <Box key={msg.id} flexDirection="column">
+            <Box flexDirection="column" height={messageViewportHeight} flexShrink={1} paddingX={1} overflowY="hidden">
+                {visibleMessages.map(({ message: msg, index }) => (
+                    <Box key={getMessageKey(msg, index)} flexDirection="column">
                         <Box>
                             <Text color="cyan" bold>
                                 {msg.username}
@@ -480,7 +606,7 @@ s.on('message:new', (msg) => {
                                 {new Date(msg.created_at).toLocaleTimeString()}
                             </Text>
                         </Box>
-                        <Box paddingLeft={2}>
+                        <Box paddingLeft={2} width={messageWidth}>
                             {msg.type === 'code_snippet' ? (
                                 <Box flexDirection="column">
                                     <Text color="yellow" bold>
@@ -497,7 +623,7 @@ s.on('message:new', (msg) => {
                                     </Box>
                                 </Box>
                             ) : (
-                                <Text>{msg.content}</Text>
+                                <Text wrap="wrap">{String(msg.content ?? '')}</Text>
                             )}
                         </Box>
                     </Box>
@@ -505,9 +631,12 @@ s.on('message:new', (msg) => {
             </Box>
 
             <Box borderStyle="single" paddingX={1} flexDirection="column">
+                {!currentChannel && channelLoadState !== 'loading' && (
+                    <Text color="red">No channel selected — press R to retry or Ctrl+C to exit.</Text>
+                )}
                 <Text color="cyan">
                     {mode === 'code' ? `[${codeLanguage}] ` : '> '}
-                    {mode === 'code' ? 'Ctrl+D send, Esc clear, Tab indent' : 'Enter send'}
+                    {mode === 'code' ? 'Ctrl+D send, Esc clear, Tab indent' : 'Enter send · Alt+Up/Alt+Down scroll'}
                 </Text>
                 <Box flexDirection="column" height={editorBoxHeight} overflowY="hidden">
                     {mode === 'code'

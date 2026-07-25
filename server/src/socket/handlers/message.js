@@ -1,3 +1,4 @@
+//-- Active: 1783004658282@@127.0.0.1@5432@terminalclichatapp
 import db from '../../config/db.js';
 import { messageCacheLimit } from '../../config/env.js';
 import { messageCacheTtlSeconds } from '../../config/env.js';
@@ -5,9 +6,9 @@ import { messageCacheTtlSeconds } from '../../config/env.js';
 export default (io, socket, publisher) => {
     const { userId } = socket.user;
 
-    // =========================================================
+  
     // RESUME / MESSAGE REPLAY
-    // =========================================================
+    
 
     socket.on("resume", async ({ channelId, lastCursor }) => {
         try {
@@ -58,7 +59,7 @@ export default (io, socket, publisher) => {
                         socket.emit('message:new', message);
                     }
                 }
-
+                 console.log("Replay: PSQL only");
                 return;
             }
 
@@ -74,24 +75,6 @@ export default (io, socket, publisher) => {
 
             
             // CASE 2: CLIENT CURSOR IS OLDER THAN REDIS
-            
-            
-          
-            // lastCursor = 20
-            
-            // PostgreSQL:
-            // 1 ... 100
-            
-            // Redis:
-            // 80 ... 100
-            
-            // Redis cannot provide 21 ... 79.
-            
-          
-            
-            // PostgreSQL  21 ... 79
-            // Redis       80 ... 100
-            
 
             if (
                 lastCursor != null &&
@@ -156,7 +139,10 @@ export default (io, socket, publisher) => {
 
                 }
 
+                console.log("Replay: PostgreSQL + Redis");
+
                 return;
+
             }
 
 
@@ -194,7 +180,7 @@ export default (io, socket, publisher) => {
                 );
 
             }
-
+        console.log("Replay: Redis only");
 
         } catch (err) {
 
