@@ -3,8 +3,18 @@ import db from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import { publisher } from '../config/redis.js';
 import { jwtSecret } from '../config/env.js';
+import { getPgQueryCount } from '../config/db.js';
+import { getRedisHitCount, getRedisMissCount } from '../config/redis.js';
 
 const router = Router();
+
+router.get('/metrics', (_req, res) => {
+    res.json({
+        pgQueryCount: getPgQueryCount(),
+        redisHitCount: getRedisHitCount(),
+        redisMissCount: getRedisMissCount(),
+    });
+});
 
 //actual authentication
 

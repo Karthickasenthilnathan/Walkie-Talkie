@@ -2,6 +2,10 @@
 import db from '../../config/db.js';
 import { messageCacheLimit } from '../../config/env.js';
 import { messageCacheTtlSeconds } from '../../config/env.js';
+import {
+    incrementRedisHitCount,
+    incrementRedisMissCount,
+} from '../../config/redis.js';
 
 export default (io, socket, publisher) => {
     const { userId } = socket.user;
@@ -42,6 +46,8 @@ export default (io, socket, publisher) => {
 
                 if (lastCursor != null) {
 
+                    incrementRedisMissCount();
+
                     const result = await db.query(
                         `
                         SELECT m.*, u.username
@@ -80,6 +86,9 @@ export default (io, socket, publisher) => {
                 lastCursor != null &&
                 Number(lastCursor) < oldestCachedSeq - 1
             ) {
+
+                incrementRedisMissCount();
+                incrementRedisHitCount();
 
                
                 // Fetch the missing gap from PostgreSQL
@@ -170,6 +179,8 @@ export default (io, socket, publisher) => {
                     minScore,
                     '+inf'
                 );
+
+            incrementRedisHitCount();
 
 
             for (const encodedMessage of cachedMessages) {
