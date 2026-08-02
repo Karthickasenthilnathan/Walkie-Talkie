@@ -245,7 +245,7 @@ s.on("channel:joined", (channelId) => {
         lastCursor: lastCursor.current,
     });
 });
-s.on('message:new', (msg) => {
+const handleMessage = (msg) => {
     setMessages((prev) => {
         const identity = msg.id ?? msg.seq ?? `${msg.created_at}-${msg.username}-${msg.content}`;
         const next = new Map(
@@ -271,6 +271,10 @@ s.on('message:new', (msg) => {
     ) {
         lastCursor.current = msg.seq;
     }
+};
+s.on('message:new', handleMessage);
+s.on('messages:replay', (messages) => {
+    if (Array.isArray(messages)) messages.forEach(handleMessage);
 });
 
         return () => {

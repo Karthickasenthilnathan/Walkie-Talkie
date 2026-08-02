@@ -73,8 +73,8 @@ function stats(values) {
 
   return {
     count,
-    min: Math.min(...numeric),
-    max: Math.max(...numeric),
+    min: numeric.reduce((min, value) => Math.min(min, value), numeric[0]),
+    max: numeric.reduce((max, value) => Math.max(max, value), numeric[0]),
     mean: numeric.reduce((sum, value) => sum + value, 0) / count,
     p50: percentile(numeric, 50),
     p95: percentile(numeric, 95),

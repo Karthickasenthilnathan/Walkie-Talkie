@@ -80,15 +80,14 @@ router.get('/channels/:id/messages', auth, async (req, res) => {
 });
 
 router.get('/users', auth, async (req, res) => {
-    const online = await publisher.sMembers('online_users');
-
     const result = await db.query(
         'SELECT id, username, avatar_url FROM users ORDER BY username'
     );
 
     const users = result.rows.map(u => ({
-        ...u,
-        online: online.includes(String(u.id))
+        id: u.id,
+        username: u.username,
+        avatar_url: u.avatar_url
     }));
 
     res.json(users);

@@ -36,7 +36,7 @@ class BenchmarkClient {
       },
     });
 
-    this.socket.on(this.events.message, (message) => {
+    const recordMessage = (message) => {
       this.messagesReceived += 1;
 
       const sequence = message && (message.seq ?? message.sequence);
@@ -54,6 +54,11 @@ class BenchmarkClient {
       if (sentAtMs !== null) {
         this.latencies.push(Math.max(0, Date.now() - sentAtMs));
       }
+    };
+
+    this.socket.on(this.events.message, recordMessage);
+    this.socket.on('messages:replay', (messages) => {
+      if (Array.isArray(messages)) messages.forEach(recordMessage);
     });
   }
 

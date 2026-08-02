@@ -15,6 +15,7 @@ export default (io, socket, publisher) => {
     
 
     socket.on("resume", async ({ channelId, lastCursor }) => {
+        const replayMessages = [];
         try {
             if (!channelId) {
                 return;
@@ -61,11 +62,9 @@ export default (io, socket, publisher) => {
                         [channelId, Number(lastCursor)]
                     );
 
-                    for (const message of result.rows) {
-                        socket.emit('message:new', message);
-                    }
+                    replayMessages.push(...result.rows);
                 }
-                 console.log("Replay: PSQL only");
+                 //console.log("Replay: PSQL only");
                 return;
             }
 
@@ -117,12 +116,7 @@ export default (io, socket, publisher) => {
            
                 // 21 ... 79
 
-                for (const message of result.rows) {
-                    socket.emit(
-                        'message:new',
-                        message
-                    );
-                }
+                replayMessages.push(...result.rows);
 
 
                 
@@ -139,16 +133,9 @@ export default (io, socket, publisher) => {
                     );
 
 
-                for (const encodedMessage of cachedMessages) {
+                replayMessages.push(...cachedMessages.map((encodedMessage) => JSON.parse(encodedMessage)));
 
-                    socket.emit(
-                        'message:new',
-                        JSON.parse(encodedMessage)
-                    );
-
-                }
-
-                console.log("Replay: PostgreSQL + Redis");
+                //console.log("Replay: PostgreSQL + Redis");
 
                 return;
 
@@ -183,15 +170,8 @@ export default (io, socket, publisher) => {
             incrementRedisHitCount();
 
 
-            for (const encodedMessage of cachedMessages) {
-
-                socket.emit(
-                    'message:new',
-                    JSON.parse(encodedMessage)
-                );
-
-            }
-        console.log("Replay: Redis only");
+            replayMessages.push(...cachedMessages.map((encodedMessage) => JSON.parse(encodedMessage)));
+        //console.log("Replay: Redis only");
 
         } catch (err) {
 
@@ -202,12 +182,11 @@ export default (io, socket, publisher) => {
 
         } finally {
 
-            /*
-              Replay has finished
-             */
+           
 
             socket.data.caughtUp = true;
 
+            socket.emit('messages:replay', replayMessages);
             socket.emit(
                 "resume_complete"
             );
@@ -216,9 +195,9 @@ export default (io, socket, publisher) => {
 
 
 
-    // =========================================================
+    
     // CHANNEL MESSAGE
-    // =========================================================
+    
 
     socket.on(
         'message:send',
@@ -411,10 +390,7 @@ export default (io, socket, publisher) => {
 
 
 
-    // =========================================================
-    // REDIS MESSAGE CACHE
-    // =========================================================
-
+    
     async function cacheMessage(
         channelId,
         message

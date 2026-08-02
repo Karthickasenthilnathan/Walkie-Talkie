@@ -19,7 +19,12 @@ export async function runScenario(mode, clientCount, missedCount) {
   const seeded = await seedBenchmarkData(clientCount);
   const clients = seeded.users.map((user) => new BenchmarkClient({
     url: DEFAULT_URL,
+
     token: user.token,
+    socketOptions: {
+    transports: ['websocket'],
+    upgrade: false,
+  },
   }));
 
   const half = Math.ceil(clients.length / 2);
