@@ -79,12 +79,3 @@ Open a new terminal window and run:
 ```bash
 npm run client
 ```
-
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome!
-Feel free to check the [issues page](https://github.com/Karthickasenthilnathan/Walkie-Talkie/issues).
-
-## 📄 License
-
-This project is licensed under the ISC License.
